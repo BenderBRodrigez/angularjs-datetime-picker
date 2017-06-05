@@ -3,19 +3,6 @@
 
   angular.module('angularjs-datetime-picker', []);
 
-  var getTimezoneOffset = function(date) {
-    (typeof date == 'string')  && (date = new Date(date));
-    var jan = new Date(date.getFullYear(), 0, 1);
-    var jul = new Date(date.getFullYear(), 6, 1);
-    var stdTimezoneOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
-    var isDST = date.getTimezoneOffset() < stdTimezoneOffset;
-    var offset = isDST ? stdTimezoneOffset - 60 : stdTimezoneOffset;
-    var diff = offset >=0 ? '-' : '+';
-    return diff +
-      ("0"+ (offset / 60)).slice(-2) + ':' +
-      ("0"+ (offset % 60)).slice(-2);
-  };
-
   var DatetimePicker = function($compile, $document, $controller){
     var datetimePickerCtrl = $controller('DatetimePickerCtrl'); //directive controller
     return {
@@ -48,9 +35,7 @@
       options.day      && div.attr('day', parseInt(options.day));
       options.hour     && div.attr('hour', parseInt(options.hour));
       options.minute   && div.attr('minute', parseInt(options.minute));
-      if (options.dateOnly === '' || options.dateOnly === true) {
-        div.attr('date-only', 'true');
-      }
+      options.dateOnly && div.attr('date-only', options.dateOnly);
       if (options.closeOnSelect === 'false') {
         div.attr('close-on-select', 'false');
       }
@@ -64,7 +49,6 @@
 
       //show datetimePicker below triggerEl
       var bcr = triggerEl.getBoundingClientRect();
-
 
       options.scope.$apply();
 
@@ -118,19 +102,29 @@
     '    <div class="adp-day selectable" ng-repeat="day in mv.days" ',
     '      today="{{today}}" d2="{{mv.year + \'-\' + (mv.month + 1) + \'-\' + day}}"',
     '      ng-class="{',
-    '        selected: (day == selectedDay),',
-    '        today: (today == (mv.year + \'-\' + (mv.month + 1) + \'-\' + day)),',
+    '        today: (day == selectedDay),',
+    '        selected: (today == (mv.year + \'-\' + (mv.month + 1) + \'-\' + day)),',
     '        weekend: (mv.leadingDays.length + day)%7 == 1 || (mv.leadingDays.length + day)%7 == 0',
     '      }">',
     '      {{::day}}',
     '    </div>',
     '    <div class="adp-day" ng-show="mv.trailingDays.length < 7" ng-repeat="day in mv.trailingDays">{{::day}}</div>',
     '  </div>',
-    '  <div class="adp-days" id="adp-time"> ',
-    '    <label class="timeLabel">Time:</label> <span class="timeValue">{{("0"+inputHour).slice(-2)}} : {{("0"+inputMinute).slice(-2)}}</span><br/>',
-    '    <label class="hourLabel">Hour:</label> <input class="hourInput" type="range" min="0" max="23" ng-model="inputHour" ng-change="updateNgModel()" />',
-    '    <label class="minutesLabel">Min:</label> <input class="minutesInput" type="range" min="0" max="59" ng-model="inputMinute"  ng-change="updateNgModel()"/> ',
+    '  <div class="adp-days adp-time"> ',
+    '    <input type="checkbox" id="date-only" ng-model="dateOnly" ng-change="toggleDateOnly()" /><label for="date-only">Flexible Time</label> ',
     '  </div> ',
+    '  <div class="adp-days adp-time" ng-if="!dateOnly"> ',
+    '    <label class="timeLabel">Start Time:</label> ',
+    '    <span class="timeValue"> ',
+    '      <i class="fa fa-chevron-left" ng-click="decreHour()"></i> ',
+    '      {{("0"+displayHour).slice(-2)}} ',
+    '      <i class="fa fa-chevron-right" ng-click="increHour()"></i> ',
+    '      : <i class="fa fa-chevron-left" ng-click="decreMinute()"></i> ',
+    '      {{("0"+inputMinute).slice(-2)}} ',
+    '      <i class="fa fa-chevron-right" ng-click="increMinute()"></i> ',
+    '      <span ng-click="toggleAmPm()">{{ampm}}</span> ',
+    '    </span>',
+    '  </div>',
     '</div>'].join("\n");
 
   var datetimePickerPopup = function($locale, dateFilter){
@@ -191,38 +185,27 @@
     var linkFunc = function(scope, element, attrs, ctrl) { //jshint ignore:line
       initVars(); //initialize days, months, daysOfWeek, and firstDayOfWeek;
       var dateFormat = attrs.dateFormat || 'short';
+      var setAmPm = function () {
+        scope.ampm = scope.ampm == 'AM' ? 'PM' : 'AM';
+      }
       scope.months = months;
       scope.daysOfWeek = daysOfWeek;
       scope.inputHour;
       scope.inputMinute;
-
-      if (scope.dateOnly === true){
-        element[0].querySelector('#adp-time').style.display = 'none';
-      }
 
       scope.$applyAsync( function() {
         ctrl.triggerEl = angular.element(element[0].triggerEl);
         if (attrs.ngModel) { // need to parse date string
           var dateStr = ''+ctrl.triggerEl.scope().$eval(attrs.ngModel);
           if (dateStr) {
-            if (!dateStr.match(/[0-9]{2}:/)) {  // if no time is given, add 00:00:00 at the end
-              dateStr += " 00:00:00";
+            if (!dateStr.match(/[0-9]{2}:/)) {  // if no time is given, add 00:00 at the end
+              dateStr += " 00:00";
             }
-            dateStr = dateStr.replace(/([0-9]{2}-[0-9]{2})-([0-9]{4})/,'$2-$1');      //mm-dd-yyyy to yyyy-mm-dd
-            dateStr = dateStr.replace(/([\/-][0-9]{2,4})\ ([0-9]{2}\:[0-9]{2}\:)/,'$1T$2'); //reformat for FF
+            dateStr = dateStr.replace(/([0-9]{2}-[0-9]{2})-([0-9]{4})/,'$2-$1'); //mm-dd-yyyy to yyyy-mm-dd
             dateStr = dateStr.replace(/EDT|EST|CDT|CST|MDT|PDT|PST|UT|GMT/g,''); //remove timezone
             dateStr = dateStr.replace(/\s*\(\)\s*/,'');                          //remove timezone
             dateStr = dateStr.replace(/[\-\+][0-9]{2}:?[0-9]{2}$/,'');           //remove timezone
-            dateStr += getTimezoneOffset(dateStr);
-            var d = new Date(dateStr);
-            scope.selectedDate = new Date(
-              d.getFullYear(),
-              d.getMonth(),
-              d.getDate(),
-              d.getHours(),
-              d.getMinutes(),
-              d.getSeconds()
-            );
+            scope.selectedDate = new Date(dateStr);
           }
         }
 
@@ -235,8 +218,11 @@
           var minute = scope.minute || today.getMinutes();
           scope.selectedDate = new Date(year, month, day, hour, minute, 0);
         }
-        scope.inputHour   = scope.selectedDate.getHours();
+        scope.inputHour = scope.selectedDate.getHours();
         scope.inputMinute = scope.selectedDate.getMinutes();
+        scope.ampm = scope.inputHour >= 12 ? 'PM' : 'AM';
+        scope.displayHour = scope.ampm == 'PM' ? scope.inputHour - 12 : scope.inputHour;
+        if (!scope.displayHour) scope.displayHour = 12;
 
         // Default to current year and month
         scope.mv = getMonthView(scope.selectedDate.getFullYear(), scope.selectedDate.getMonth());
@@ -247,6 +233,23 @@
           scope.selectedDay = null;
         }
       });
+
+      scope.toggleAmPm = function () {
+        setAmPm();
+        if (scope.ampm == 'AM') {
+          scope.inputHour -= 12;
+        }
+        if (scope.ampm == 'PM') {
+          scope.inputHour += 12;
+        }
+        scope.updateNgModel();
+      }
+
+      scope.toggleDateOnly = function () {
+        dateFormat = scope.dateOnly ? 'MM/dd/yyyy' : attrs.dateFormat;
+        if (!scope.inputHour) scope.displayHour = 12;
+        scope.updateNgModel();
+      }
 
       scope.addMonth = function (amount) {
         scope.mv = getMonthView(scope.mv.year, scope.mv.month + amount);
@@ -269,7 +272,6 @@
         );
         scope.selectedDay = scope.selectedDate.getDate();
         if (attrs.ngModel) {
-          //console.log('attrs.ngModel',attrs.ngModel);
           var elScope = ctrl.triggerEl.scope(), dateValue;
           if (elScope.$eval(attrs.ngModel) && elScope.$eval(attrs.ngModel).constructor.name === 'Date') {
             dateValue = new Date(dateFilter(scope.selectedDate, dateFormat));
@@ -279,6 +281,30 @@
           elScope.$eval(attrs.ngModel + '= date', {date: dateValue});
         }
       };
+
+      scope.increMinute = function () {
+        scope.inputMinute = scope.inputMinute < 45 ? scope.inputMinute + 15 : 0;
+        scope.updateNgModel();
+      }
+
+      scope.decreMinute = function () {
+        scope.inputMinute = scope.inputMinute < 15 ? 45 : scope.inputMinute - 15;
+        scope.updateNgModel();
+      }
+
+      scope.increHour = function () {
+        scope.inputHour = scope.inputHour < 23 ? scope.inputHour+1 : 0;
+        scope.displayHour = scope.displayHour < 12 ? scope.displayHour+1 : 1;
+        if (scope.displayHour == 12) setAmPm();
+        scope.updateNgModel();
+      }
+
+      scope.decreHour = function () {
+        scope.inputHour = scope.inputHour > 0 ? scope.inputHour-1 : 23;
+        scope.displayHour = scope.displayHour > 1 ? scope.displayHour-1 : 12;
+        if (scope.displayHour == 11) setAmPm();
+        scope.updateNgModel();
+      }
 
       scope.$on('$destroy', ctrl.closeDatetimePicker);
     };
